@@ -1,5 +1,5 @@
 name: chat_app
-description: "تطبيق عيون الهندسة للمحادثات" # تم تحديث الوصف ليكون احترافياً
+description: "تطبيق عيون الهندسة للمحادثات والمكالمات المرئية والصوتية"
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -21,8 +21,11 @@ dependencies:
   firebase_messaging: ^15.1.2
   firebase_database: ^11.1.3
 
-  # --- Calls & Communication ---
+  # --- Calls & Communication (تم التحديث لدعم ميزات الاتصال) ---
   agora_rtc_engine: ^6.3.2
+  wakelock_plus: ^1.2.8 # ضروري لـ video_call_screen لمنع قفل الشاشة تلقائياً أثناء المكالمة
+  vibration: ^2.0.1 # يستخدم في incoming_call_screen لإضافة ميزة الاهتزاز عند الاتصال
+  connectivity_plus: ^6.0.3 # مفيد لـ call_service لفحص حالة الشبكة قبل بدء المكالمة
 
   # --- Files, Media & Audio ---
   file_picker: ^8.1.2
@@ -32,25 +35,23 @@ dependencies:
   flutter_sound: ^9.2.13
   audio_session: ^0.1.21
   video_compress: ^3.1.2
-  audioplayers: ^5.2.1
+  audioplayers: ^5.2.1 # يستخدم لتشغيل نغمات الرنين في شاشة المكالمة الواردة
 
-  # --- App Updates & Network (جديد) ---
-  dio: ^5.4.3+1 # للتحميل الداخلي لملف التحديث
-  open_filex: ^4.4.0 # لفتح ملف الـ APK وبدء التثبيت
+  # --- App Updates & Network ---
+  dio: ^5.4.3+1
+  open_filex: ^4.4.0
 
   # --- Utilities & Helpers ---
   url_launcher: ^6.3.0
   path_provider: ^2.1.4
-  permission_handler: ^11.3.1
+  permission_handler: ^11.3.1 # ضروري لطلب صلاحيات الكاميرا والميكروفون للمكالمات
   shared_preferences: ^2.3.2
   http: ^1.2.1
   intl: ^0.20.2
   path: ^1.9.0
-
-  # 💡 [إضافات جديدة احترافية للتطبيق] 💡
-  cached_network_image: ^3.3.1 # لحفظ الصور في الذاكرة وتقليل استهلاك الإنترنت
-  timeago: ^3.6.1 # لتحويل التواريخ إلى صيغة (منذ 5 دقائق، منذ ساعتين)
-  uuid: ^4.4.0 # لتوليد معرفات (IDs) فريدة للرسائل والمكالمات
+  cached_network_image: ^3.3.1
+  timeago: ^3.6.1
+  uuid: ^4.4.0
 
   # --- System Info & Notifications ---
   package_info_plus: ^8.0.0
@@ -80,9 +81,8 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
 
-  # 💡 تم تحديث المسارات لضمان وصول التطبيق لجميع الملفات
   assets:
     - assets/
     - assets/icons/
-    - assets/placeholder.png # لضمان عمل الصورة الافتراضية للبروفايل
-    - assets/sounds/ # تعريف مجلد الصوتيات لكي يتعرف التطبيق على نغمات الرنين
+    - assets/placeholder.png
+    - assets/sounds/ # تأكد من وجود ملفات الرنين (مثل ringtone.mp3) داخل هذا المجلد
