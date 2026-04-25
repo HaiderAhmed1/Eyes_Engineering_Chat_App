@@ -10,15 +10,15 @@ import 'package:chat_app/firebase_options.dart';
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
+  FlutterLocalNotificationsPlugin();
 
   // تهيئة الخدمة
   static Future<void> initialize() async {
     const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/launcher_icon');
+    AndroidInitializationSettings('@mipmap/launcher_icon');
 
     const DarwinInitializationSettings initializationSettingsIOS =
-        DarwinInitializationSettings(
+    DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
       requestSoundPermission: true,
@@ -41,7 +41,7 @@ class NotificationService {
       sound: true,
       provisional: false,
     );
-    
+
     await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
       alert: true,
       badge: true,
@@ -53,9 +53,9 @@ class NotificationService {
 
   static Future<void> _createNotificationChannels() async {
     const AndroidNotificationChannel defaultChannel = AndroidNotificationChannel(
-      'high_importance_channel', 
-      'إشعارات هامة',
-      description: 'تستخدم هذه القناة للإشعارات المهمة والرسائل.',
+      'high_importance_channel',
+      'إشعارات الرسائل والمكالمات', // تم تحديث الاسم
+      description: 'تستخدم هذه القناة للإشعارات المهمة والمكالمات الواردة.',
       importance: Importance.max,
       playSound: true,
       enableVibration: true,
@@ -63,7 +63,7 @@ class NotificationService {
 
     await _flutterLocalNotificationsPlugin
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
+        AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(defaultChannel);
   }
 
@@ -87,14 +87,20 @@ class NotificationService {
     final Map<String, dynamic> data = message.data;
     final RemoteNotification? notification = message.notification;
 
-    String title = notification?.title ?? data['senderName'] ?? 'رسالة جديدة';
+    String title = notification?.title ?? data['senderName'] ?? 'إشعار جديد';
     String body = notification?.body ?? data['text'] ?? '';
     String? imageUrl = data['imageUrl'] ?? data['fileUrl']; // إذا كانت الرسالة صورة
     String? senderImage = data['senderImage']; // صورة البروفايل
     String? type = data['type'];
 
+    // 🟢 إضافة هامة: التمييز بين المكالمة والرسالة العادية
+    // نتحقق إذا كان الإشعار مكالمة بناءً على الـ type أو وجود channelId الخاص بـ Agora
+    bool isCall = type == 'call' || data['isCall'] == 'true' || data.containsKey('channelId');
+
     // تحسين النص بناءً على النوع
-    if (type == 'image') {
+    if (isCall) {
+      body = '📞 مكالمة واردة...';
+    } else if (type == 'image') {
       body = '📷 صورة';
       imageUrl = data['fileUrl']; // تأكيد استخدام رابط الصورة
     } else if (type == 'video') {
@@ -104,7 +110,7 @@ class NotificationService {
     } else if (type == 'file') {
       body = '📎 ملف';
     }
-    
+
     if (body.isEmpty) body = 'محتوى جديد';
 
     // إعداد الأنماط المتقدمة
@@ -121,7 +127,7 @@ class NotificationService {
       // 2. تحميل الصورة الكبيرة (Big Picture) إذا كانت الرسالة صورة
       if (type == 'image' && imageUrl != null && imageUrl.isNotEmpty) {
         bigPicturePath = await _downloadAndSaveFile(imageUrl, 'big_picture_${DateTime.now().millisecondsSinceEpoch}.jpg');
-        
+
         styleInformation = BigPictureStyleInformation(
           FilePathAndroidBitmap(bigPicturePath),
           largeIcon: largeIconPath != null ? FilePathAndroidBitmap(largeIconPath) : null,
@@ -147,25 +153,29 @@ class NotificationService {
       body,
       NotificationDetails(
         android: AndroidNotificationDetails(
-          channelId, 
-          'إشعارات الرسائل',
-          channelDescription: 'تنبيهات الرسائل الواردة',
+          channelId,
+          'إشعارات الرسائل والمكالمات',
+          channelDescription: 'تنبيهات الرسائل والمكالمات الواردة',
           importance: Importance.max,
           priority: Priority.high,
           icon: '@mipmap/launcher_icon',
-          largeIcon: largeIconPath != null ? FilePathAndroidBitmap(largeIconPath) : null, // صورة البروفايل
-          styleInformation: styleInformation, // النمط (صورة أو نص طويل)
+          largeIcon: largeIconPath != null ? FilePathAndroidBitmap(largeIconPath) : null,
+          styleInformation: styleInformation,
           playSound: true,
           enableVibration: true,
-          category: AndroidNotificationCategory.message,
-          visibility: NotificationVisibility.public,
-          
-          // تجميع الإشعارات
-          groupKey: data['chatId'] ?? 'com.haider.chat.app.WORK_EMAIL', 
-          setAsGroupSummary: false, // ليس ملخصاً بل رسالة فردية
 
-          // أزرار التفاعل
-          actions: [
+          // 🟢 التعديل الجذري لحل مشكلة الشاشة المغلقة والمكالمات المخفية
+          fullScreenIntent: isCall, // يوقظ الشاشة ويظهر الإشعار فوق القفل إذا كانت مكالمة
+          category: isCall ? AndroidNotificationCategory.call : AndroidNotificationCategory.message,
+
+          visibility: NotificationVisibility.public,
+
+          // تجميع الإشعارات للرسائل فقط (لضمان عدم دمج المكالمات مع الرسائل)
+          groupKey: isCall ? null : (data['chatId'] ?? 'com.haider.chat.app.WORK_EMAIL'),
+          setAsGroupSummary: false,
+
+          // أزرار التفاعل (نظهرها فقط إذا لم تكن مكالمة، لأن المكالمة لها شاشتها الخاصة)
+          actions: isCall ? [] : [
             const AndroidNotificationAction(
               'reply_action',
               'رد',
@@ -183,7 +193,7 @@ class NotificationService {
           presentAlert: true,
           presentBadge: true,
           presentSound: true,
-          attachments: [], // يمكن إضافة الصور هنا لاحقاً
+          attachments: [],
         ),
       ),
       payload: data.toString(),
@@ -198,7 +208,7 @@ class NotificationService {
   static void _onNotificationTapBackground(NotificationResponse details) {
     debugPrint("Background Tap: ${details.payload}");
   }
-  
+
   @pragma('vm:entry-point')
   static Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);

@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:vibration/vibration.dart'; // 📦 إضافة الاهتزاز
+import 'package:wakelock_plus/wakelock_plus.dart'; // 📦 بقاء الشاشة مضاءة أثناء الرنين
+
 import 'package:chat_app/services/call_service.dart';
 import 'package:chat_app/screens/video_call_screen.dart';
 
@@ -24,6 +27,16 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   }
 
   Future<void> _initializeIncomingCall() async {
+    // 💡 إبقاء الشاشة مضاءة أثناء الرنين
+    WakelockPlus.enable();
+
+    // 💡 تفعيل الاهتزاز المستمر
+    bool? hasVibrator = await Vibration.hasVibrator();
+    if (hasVibrator == true) {
+      // انتظار 500 ملي ثانية، ثم اهتزاز 1000، وتكرار ذلك
+      Vibration.vibrate(pattern: [500, 1000], repeat: 0);
+    }
+
     // 1. تشغيل نغمة الرنين المحلية للمستقبل
     await CallService.playRingingTone();
 
@@ -33,6 +46,13 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
       receiverId: widget.call.receiverId,
       status: 'ringing',
     );
+  }
+
+  // 🟢 دالة مجمعة لإيقاف كل تأثيرات الرنين (صوت + اهتزاز)
+  Future<void> _stopRingingEffects() async {
+    await CallService.stopAudio();
+    Vibration.cancel();
+    WakelockPlus.disable(); // السماح للشاشة بالانطفاء الطبيعي لاحقاً
   }
 
   // 🟢 [جديد]: دالة لمراقبة إذا قام المتصل بإنهاء المكالمة قبل أن نرد
@@ -52,7 +72,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
 
   // 🟢 [جديد]: دالة لإنهاء الشاشة والصوت بأمان إذا ألغى المتصل
   void _terminateScreenLocally() async {
-    await CallService.stopAudio();
+    await _stopRingingEffects();
     if (mounted) {
       Navigator.pop(context); // إغلاق شاشة الاستقبال
     }
@@ -60,7 +80,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
 
   // دالة رفض المكالمة (مستخدمة في الزر الأحمر وعند الضغط على زر الرجوع للهاتف)
   Future<void> _rejectCall() async {
-    await CallService.stopAudio();
+    await _stopRingingEffects();
     await CallService.saveCallHistory(call: widget.call, status: 'rejected');
     await CallService.endCall(
       callerId: widget.call.callerId,
@@ -72,7 +92,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   @override
   void dispose() {
     _callSubscription?.cancel(); // إيقاف المستمع لمنع تسرب الذاكرة
-    CallService.stopAudio(); // تأكيد إيقاف الصوت
+    _stopRingingEffects(); // تأكيد إيقاف كل شيء عند تدمير الشاشة
     super.dispose();
   }
 
@@ -162,8 +182,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                       icon: widget.call.isVideo ? Icons.videocam : Icons.call,
                       color: Colors.greenAccent[400]!,
                       onTap: () async {
-                        // 1. إيقاف الرنين فوراً
-                        await CallService.stopAudio();
+                        // 1. إيقاف التأثيرات (الاهتزاز والصوت) فوراً
+                        await _stopRingingEffects();
 
                         // 2. تحديث الحالة إلى "answered" (تم الرد)
                         await CallService.updateCallStatus(

@@ -4,6 +4,7 @@ import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:permission_handler/permission_handler.dart'; // 📦 إضافة هامة للصلاحيات
 import 'package:audioplayers/audioplayers.dart'; // 📦 إضافة هامة لتشغيل الرنين
+import 'package:wakelock_plus/wakelock_plus.dart'; // 📦 لمنع انطفاء الشاشة أثناء المكالمة
 
 import 'package:chat_app/services/call_service.dart';
 import 'package:chat_app/widgets/call_overlay.dart';
@@ -37,6 +38,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   @override
   void initState() {
     super.initState();
+    // 💡 تفعيل منع انطفاء الشاشة تلقائياً أثناء المكالمة
+    WakelockPlus.enable();
+
     _isCameraOff = !widget.call.isVideo;
     // مكالمة الفيديو تستخدم مكبر الصوت افتراضياً، والمكالمة الصوتية تستخدم سماعة الأذن
     _isSpeakerOn = widget.call.isVideo;
@@ -85,8 +89,16 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     }
   }
 
-  void _stopAudio() {
-    _audioPlayer.stop();
+  // 💡 التعديل الجوهري: تحرير الموارد لضمان عمل المايكروفون مع Agora
+  Future<void> _stopAudio() async {
+    try {
+      if (_audioPlayer.state == PlayerState.playing) {
+        await _audioPlayer.stop();
+      }
+      await _audioPlayer.release();
+    } catch (e) {
+      debugPrint("Audio Stop Error: $e");
+    }
   }
 
   void _listenToCallStatus() {
@@ -177,7 +189,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   Future<void> _endCall({bool remoteEnded = false}) async {
     _timer?.cancel();
-    _stopAudio(); // إيقاف أي صوت شغال عند الإنهاء
+    await _stopAudio(); // إيقاف أي صوت شغال عند الإنهاء
 
     try {
       await _engine.leaveChannel();
@@ -222,7 +234,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   void dispose() {
     _timer?.cancel();
     _callSubscription?.cancel();
+    _stopAudio(); // تأكيد تحرير الصوت
     _audioPlayer.dispose(); // 5️⃣ تنظيف مشغل الصوت من الذاكرة لتفادي انهيار التطبيق
+    WakelockPlus.disable(); // 💡 السماح للشاشة بالانطفاء الطبيعي بعد انتهاء المكالمة
     super.dispose();
   }
 

@@ -192,7 +192,7 @@ class CallService {
   // 2️⃣ إنهاء المكالمة (باستخدام Batch)
   static Future<bool> endCall({required String callerId, required String receiverId}) async {
     try {
-      await stopAudio(); // إيقاف أي صوت فوراً
+      await stopAudio(); // إيقاف أي صوت فوراً وتحرير الموارد
 
       final batch = _firestore.batch();
       final callerRef = _firestore.collection('users').doc(callerId).collection('call').doc('current_call');
@@ -225,8 +225,6 @@ class CallService {
       final callerRef = _firestore.collection('users').doc(callerId).collection('call').doc('current_call');
       final receiverRef = _firestore.collection('users').doc(receiverId).collection('call').doc('current_call');
 
-      // استخدمنا SetOptions(merge: true) بدلاً من update لتفادي انهيار التطبيق
-      // إذا حاولنا تحديث وثيقة تم حذفها للتو لأن الطرف الآخر أنهى المكالمة
       batch.set(callerRef, {'callStatus': status}, SetOptions(merge: true));
       batch.set(receiverRef, {'callStatus': status}, SetOptions(merge: true));
 
@@ -256,12 +254,14 @@ class CallService {
     }
   }
 
-  // 🎵 7️⃣ إيقاف أي صوت شغال
+  // 🎵 7️⃣ إيقاف أي صوت شغال وتحرير موارد النظام
   static Future<void> stopAudio() async {
     try {
       if (audioPlayer.state == PlayerState.playing) {
         await audioPlayer.stop();
       }
+      // هذا السطر هو الحل الجذري لمشكلة تعليق المايكروفون مع Agora
+      await audioPlayer.release();
     } catch (e) {
       debugPrint("Audio Stop Error: $e");
     }
