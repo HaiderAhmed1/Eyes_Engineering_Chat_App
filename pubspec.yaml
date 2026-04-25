@@ -2,7 +2,7 @@ name: chat_app
 description: "تطبيق عيون الهندسة للمحادثات والمكالمات المرئية والصوتية"
 publish_to: 'none'
 
-version: 1.1.0+2
+version: 1.1.1+2
 
 environment:
   sdk: '>=3.4.3 <4.0.0'
