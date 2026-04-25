@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "379839155492",
+    "project_id": "chat-app-59815",
+    "storage_bucket": "chat-app-59815.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:379839155492:android:6be5861f8b875c7f73b7b1",
+        "android_client_info": {
+          "package_name": "com.haider.chat.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "379839155492-tc1iperlaigfsffm9rkih7p8hg1vjgvf.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA_mPNfb-QM-hr7l5BpjI2AmGNNnYZlJiw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "379839155492-tc1iperlaigfsffm9rkih7p8hg1vjgvf.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
