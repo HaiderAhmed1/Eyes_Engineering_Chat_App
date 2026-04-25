@@ -1,13 +1,14 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:audioplayers/audioplayers.dart'; // 📦 [جديد]: مكتبة تشغيل الصوتيات
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart'; // من أجل debugPrint
 
 // ==========================================
 // 🔑 إعدادات حساب Agora (ديناميكي)
 // ==========================================
 class AgoraConfig {
   static const String appId = "221c0d1959d24229b3476970d89c41ad";
-  static const String tempToken = ""; // فارغ لأننا نستخدم النظام الديناميكي
-  static const String channelName = ""; // فارغ
+  static const String tempToken = "";
+  static const String channelName = "";
 }
 
 // ==========================================
@@ -23,7 +24,7 @@ class Call {
   final String channelId;
   final bool hasDialled;
   final bool isVideo;
-  final String callStatus; // 🟢 [جديد]: حالة المكالمة ('calling', 'ringing', 'answered')
+  final String callStatus;
 
   Call({
     required this.callerId,
@@ -35,7 +36,7 @@ class Call {
     required this.channelId,
     required this.hasDialled,
     required this.isVideo,
-    this.callStatus = 'calling', // الحالة الافتراضية عند بدء المكالمة
+    this.callStatus = 'calling',
   });
 
   Map<String, dynamic> toMap() {
@@ -49,23 +50,23 @@ class Call {
       'channelId': channelId,
       'hasDialled': hasDialled,
       'isVideo': isVideo,
-      'callStatus': callStatus, // 🟢 [جديد]
+      'callStatus': callStatus,
       'timestamp': FieldValue.serverTimestamp(),
     };
   }
 
   factory Call.fromMap(Map<String, dynamic> map) {
     return Call(
-      callerId: map['callerId'],
-      callerName: map['callerName'],
+      callerId: map['callerId'] ?? '',
+      callerName: map['callerName'] ?? '',
       callerPic: map['callerPic'] ?? '',
-      receiverId: map['receiverId'],
-      receiverName: map['receiverName'],
+      receiverId: map['receiverId'] ?? '',
+      receiverName: map['receiverName'] ?? '',
       receiverPic: map['receiverPic'] ?? '',
-      channelId: map['channelId'],
-      hasDialled: map['hasDialled'],
+      channelId: map['channelId'] ?? '',
+      hasDialled: map['hasDialled'] ?? false,
       isVideo: map['isVideo'] ?? false,
-      callStatus: map['callStatus'] ?? 'calling', // 🟢 [جديد]
+      callStatus: map['callStatus'] ?? 'calling',
     );
   }
 }
@@ -82,7 +83,7 @@ class CallLog {
   final String receiverPic;
   final String channelId;
   final bool isVideo;
-  final String status; // 'missed', 'accepted', 'rejected'
+  final String status;
   final Timestamp? timestamp;
 
   CallLog({
@@ -115,13 +116,13 @@ class CallLog {
 
   factory CallLog.fromMap(Map<String, dynamic> map) {
     return CallLog(
-      callerId: map['callerId'],
-      callerName: map['callerName'],
+      callerId: map['callerId'] ?? '',
+      callerName: map['callerName'] ?? '',
       callerPic: map['callerPic'] ?? '',
-      receiverId: map['receiverId'],
-      receiverName: map['receiverName'],
+      receiverId: map['receiverId'] ?? '',
+      receiverName: map['receiverName'] ?? '',
       receiverPic: map['receiverPic'] ?? '',
-      channelId: map['channelId'],
+      channelId: map['channelId'] ?? '',
       isVideo: map['isVideo'] ?? false,
       status: map['status'] ?? 'missed',
       timestamp: map['timestamp'],
@@ -134,9 +135,9 @@ class CallLog {
 // ==========================================
 class CallService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  static final AudioPlayer audioPlayer = AudioPlayer(); // 🎵 [جديد]: مشغل الصوتيات للمكالمات
+  static final AudioPlayer audioPlayer = AudioPlayer();
 
-  // 1️⃣ بدء مكالمة
+  // 1️⃣ بدء مكالمة (باستخدام Batch لضمان التزامن)
   static Future<bool> makeCall(Call call) async {
     try {
       Call callerCall = Call(
@@ -149,9 +150,8 @@ class CallService {
         channelId: call.channelId,
         hasDialled: true,
         isVideo: call.isVideo,
-        callStatus: 'calling', // 🟢 بدء المكالمة
+        callStatus: 'calling',
       );
-      await _firestore.collection('users').doc(call.callerId).collection('call').doc('current_call').set(callerCall.toMap());
 
       Call receiverCall = Call(
         callerId: call.callerId,
@@ -163,73 +163,111 @@ class CallService {
         channelId: call.channelId,
         hasDialled: false,
         isVideo: call.isVideo,
-        callStatus: 'calling', // 🟢 بدء المكالمة
+        callStatus: 'calling',
       );
-      await _firestore.collection('users').doc(call.receiverId).collection('call').doc('current_call').set(receiverCall.toMap());
 
+      final batch = _firestore.batch();
+
+      final callerRef = _firestore.collection('users').doc(call.callerId).collection('call').doc('current_call');
+      final receiverRef = _firestore.collection('users').doc(call.receiverId).collection('call').doc('current_call');
+
+      batch.set(callerRef, callerCall.toMap());
+      batch.set(receiverRef, receiverCall.toMap());
+
+      await batch.commit();
+
+      // إنشاء سجل أولي للمكالمة بحالة missed (يتم تحديثه لاحقاً إذا تم الرد)
       await saveCallHistory(call: call, status: 'missed');
 
-      // 🎵 تشغيل صوت (توت.. توت..) للمتصل
-      playDialingTone();
+      // 🎵 تشغيل صوت الاتصال للمتصل
+      await playDialingTone();
 
       return true;
     } catch (e) {
-      print("Error making call: $e");
+      debugPrint("Error making call: $e");
       return false;
     }
   }
 
-  // 2️⃣ إنهاء المكالمة
+  // 2️⃣ إنهاء المكالمة (باستخدام Batch)
   static Future<bool> endCall({required String callerId, required String receiverId}) async {
     try {
-      await stopAudio(); // 🎵 إيقاف الرنين عند إنهاء المكالمة
-      await _firestore.collection('users').doc(callerId).collection('call').doc('current_call').delete();
-      await _firestore.collection('users').doc(receiverId).collection('call').doc('current_call').delete();
+      await stopAudio(); // إيقاف أي صوت فوراً
+
+      final batch = _firestore.batch();
+      final callerRef = _firestore.collection('users').doc(callerId).collection('call').doc('current_call');
+      final receiverRef = _firestore.collection('users').doc(receiverId).collection('call').doc('current_call');
+
+      batch.delete(callerRef);
+      batch.delete(receiverRef);
+
+      await batch.commit();
       return true;
     } catch (e) {
-      print("Error ending call: $e");
+      debugPrint("Error ending call: $e");
       return false;
     }
   }
 
-  // 3️⃣ الاستماع للمكالمات الواردة والحالية
+  // 3️⃣ الاستماع للمكالمات
   static Stream<DocumentSnapshot> getCallStream(String uid) {
     return _firestore.collection('users').doc(uid).collection('call').doc('current_call').snapshots();
   }
 
-  // 🟢 4️⃣ [جديد]: تحديث حالة المكالمة (للتبديل بين: جارِ الاتصال / يرن / تم الرد)
+  // 4️⃣ تحديث حالة المكالمة بآمان (Merge True)
   static Future<void> updateCallStatus({
     required String callerId,
     required String receiverId,
     required String status,
   }) async {
     try {
-      await _firestore.collection('users').doc(callerId).collection('call').doc('current_call').update({'callStatus': status});
-      await _firestore.collection('users').doc(receiverId).collection('call').doc('current_call').update({'callStatus': status});
+      final batch = _firestore.batch();
+      final callerRef = _firestore.collection('users').doc(callerId).collection('call').doc('current_call');
+      final receiverRef = _firestore.collection('users').doc(receiverId).collection('call').doc('current_call');
+
+      // استخدمنا SetOptions(merge: true) بدلاً من update لتفادي انهيار التطبيق
+      // إذا حاولنا تحديث وثيقة تم حذفها للتو لأن الطرف الآخر أنهى المكالمة
+      batch.set(callerRef, {'callStatus': status}, SetOptions(merge: true));
+      batch.set(receiverRef, {'callStatus': status}, SetOptions(merge: true));
+
+      await batch.commit();
     } catch (e) {
-      print("Error updating call status: $e");
+      debugPrint("Error updating call status: $e");
     }
   }
 
-  // 🎵 5️⃣ [جديد]: تشغيل نغمة "جارِ الاتصال" للمتصل
+  // 🎵 5️⃣ تشغيل نغمة "جارِ الاتصال" للمتصل
   static Future<void> playDialingTone() async {
-    await audioPlayer.setReleaseMode(ReleaseMode.loop); // تكرار النغمة
-    // يجب توفير ملف صوتي في مجلد assets
-    await audioPlayer.play(AssetSource('sounds/dialing.mp3'));
+    try {
+      await audioPlayer.setReleaseMode(ReleaseMode.loop);
+      await audioPlayer.play(AssetSource('sounds/dialing.mp3'));
+    } catch (e) {
+      debugPrint("Audio Error (Dialing): $e");
+    }
   }
 
-  // 🎵 6️⃣ [جديد]: تشغيل نغمة "رنين" للمستقبل
+  // 🎵 6️⃣ تشغيل نغمة "رنين" للمستقبل
   static Future<void> playRingingTone() async {
-    await audioPlayer.setReleaseMode(ReleaseMode.loop);
-    await audioPlayer.play(AssetSource('sounds/ringtone.mp3'));
+    try {
+      await audioPlayer.setReleaseMode(ReleaseMode.loop);
+      await audioPlayer.play(AssetSource('sounds/ringtone.mp3'));
+    } catch (e) {
+      debugPrint("Audio Error (Ringing): $e");
+    }
   }
 
-  // 🎵 7️⃣ [جديد]: إيقاف أي صوت شغال حالياً
+  // 🎵 7️⃣ إيقاف أي صوت شغال
   static Future<void> stopAudio() async {
-    await audioPlayer.stop();
+    try {
+      if (audioPlayer.state == PlayerState.playing) {
+        await audioPlayer.stop();
+      }
+    } catch (e) {
+      debugPrint("Audio Stop Error: $e");
+    }
   }
 
-  // 8️⃣ حفظ أو تحديث حالة سجل المكالمة الدائم
+  // 8️⃣ حفظ أو تحديث حالة سجل المكالمة (باستخدام Batch)
   static Future<void> saveCallHistory({required Call call, required String status}) async {
     try {
       final callLog = CallLog(
@@ -253,7 +291,7 @@ class CallService {
 
       await batch.commit();
     } catch (e) {
-      print("Error saving call history: $e");
+      debugPrint("Error saving call history: $e");
     }
   }
 

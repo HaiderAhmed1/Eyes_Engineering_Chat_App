@@ -4,36 +4,43 @@ import 'package:chat_app/screens/video_call_screen.dart';
 
 class CallOverlay {
   static OverlayEntry? _overlayEntry;
-  // متغير لمراقبة حالة الشاشة (هل هي مصغرة أم لا)
+  // استخدام ValueNotifier لمراقبة حالة التصغير
   static final ValueNotifier<bool> isMinimized = ValueNotifier<bool>(false);
 
-  // 1️⃣ فتح المكالمة كطبقة عائمة فوق التطبيق
-  static void show(BuildContext context, Call call) {
-    if (_overlayEntry != null) return; // منع فتح أكثر من مكالمة في نفس الوقت
+  // مرجع لتخزين السياق (Context) لضمان الإغلاق الصحيح
+  static BuildContext? _savedContext;
 
+  // 1️⃣ فتح المكالمة كطبقة عائمة
+  static void show(BuildContext context, Call call) {
+    if (_overlayEntry != null) return;
+
+    _savedContext = context;
     isMinimized.value = false;
 
     _overlayEntry = OverlayEntry(
       builder: (context) => ValueListenableBuilder<bool>(
         valueListenable: isMinimized,
         builder: (context, minimized, child) {
-          return Stack(
-            children: [
-              // الشاشة الكاملة: نستخدم Offstage لإخفائها دون تدميرها (لكي لا ينقطع الاتصال)
-              Offstage(
-                offstage: minimized,
-                child: VideoCallScreen(call: call),
-              ),
+          return Material( // إضافة Material لضمان عمل العناصر التفاعلية
+            color: Colors.transparent,
+            child: Stack(
+              children: [
+                // الشاشة الكاملة
+                Offstage(
+                  offstage: minimized,
+                  child: VideoCallScreen(call: call),
+                ),
 
-              // الشريط الأخضر العائم: يظهر فقط عندما تكون الشاشة مصغرة
-              if (minimized) _buildFloatingBar(context, call),
-            ],
+                // الشريط العائم (يظهر فقط عند التصغير)
+                if (minimized) _buildFloatingBar(context, call),
+              ],
+            ),
           );
         },
       ),
     );
 
-    // إضافة الطبقة للتطبيق
+    // إدراج الطبقة في أعلى شجرة الودجت (rootOverlay لضمان ظهورها فوق الكيبورد والقوائم)
     Overlay.of(context, rootOverlay: true).insert(_overlayEntry!);
   }
 
@@ -42,71 +49,133 @@ class CallOverlay {
     isMinimized.value = true;
   }
 
-  // 3️⃣ تكبير المكالمة (العودة للشاشة الكاملة)
+  // 3️⃣ تكبير المكالمة
   static void maximize() {
     isMinimized.value = false;
   }
 
-  // 4️⃣ إنهاء المكالمة وإزالة الطبقة نهائياً
+  // 4️⃣ إنهاء وإزالة الطبقة نهائياً (مع الحماية من الانهيار)
   static void dismiss() {
-    _overlayEntry?.remove();
-    _overlayEntry = null;
+    if (_overlayEntry != null) {
+      try {
+        _overlayEntry!.remove();
+      } catch (e) {
+        debugPrint("Overlay already removed: $e");
+      }
+      _overlayEntry = null;
+      _savedContext = null;
+    }
   }
 
-  // 🎨 تصميم الشريط العائم (الذي يظهر بالأعلى)
+  // 🎨 تصميم الشريط العائم المحسّن
   static Widget _buildFloatingBar(BuildContext context, Call call) {
-    // نستخدم SafeArea لكي لا يختفي الشريط تحت نوتش الكاميرا العلوية
+    final double statusBarHeight = MediaQuery.of(context).padding.top;
+
     return Positioned(
-      top: MediaQuery.of(context).padding.top + 10,
-      left: 10,
-      right: 10,
-      child: Material(
-        color: Colors.transparent,
-        child: GestureDetector(
-          onTap: maximize, // عند الضغط نعود للمكالمة
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.green[600],
-              borderRadius: BorderRadius.circular(30),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
-                  blurRadius: 10,
-                  spreadRadius: 2,
-                  offset: const Offset(0, 4),
-                )
-              ],
+      top: statusBarHeight + 10,
+      left: 15,
+      right: 15,
+      child: GestureDetector(
+        onTap: maximize,
+        onVerticalDragUpdate: (details) {
+          // ميزة إضافية: إذا سحب المستخدم الشريط للأسفل يتم التكبير
+          if (details.primaryDelta! > 10) maximize();
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            // استخدام تدرج لوني ليعطي طابعاً احترافياً (أرجواني مثل تصميم تطبيقك)
+            gradient: const LinearGradient(
+              colors: [Color(0xFF7C4DFF), Color(0xFF6200EA)],
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
+            borderRadius: BorderRadius.circular(15),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.4),
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              )
+            ],
+          ),
+          child: Row(
+            children: [
+              // وميض بسيط للإشارة إلى أن المكالمة جارية
+              const _RecordingDot(),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                        call.isVideo ? Icons.videocam : Icons.call,
-                        color: Colors.white,
-                        size: 20
-                    ),
-                    const SizedBox(width: 12),
                     Text(
-                      "مكالمة جارية مع ${call.receiverName}",
+                      call.receiverName,
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        decoration: TextDecoration.none, // مهم لأننا في Overlay
+                        fontSize: 15,
                       ),
+                    ),
+                    const Text(
+                      "اضغط للعودة للمكالمة",
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
                     ),
                   ],
                 ),
-                // أيقونة التوسيع
-                const Icon(Icons.open_in_full, color: Colors.white, size: 20),
-              ],
-            ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.open_in_full, color: Colors.white, size: 22),
+                onPressed: maximize,
+              ),
+              // زر إنهاء سريع من الشريط المصغر
+              IconButton(
+                icon: const Icon(Icons.call_end, color: Colors.redAccent, size: 22),
+                onPressed: () {
+                  CallService.endCall(
+                      callerId: call.callerId,
+                      receiverId: call.receiverId
+                  );
+                  dismiss();
+                },
+              ),
+            ],
           ),
         ),
       ),
+    );
+  }
+}
+
+// ويدجت صغير لنقطة الوميض (تحسين جمالي)
+class _RecordingDot extends StatefulWidget {
+  const _RecordingDot();
+
+  @override
+  State<_RecordingDot> createState() => _RecordingDotState();
+}
+
+class _RecordingDotState extends State<_RecordingDot> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _controller,
+      child: const Icon(Icons.fiber_manual_record, color: Colors.redAccent, size: 18),
     );
   }
 }

@@ -2,8 +2,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:permission_handler/permission_handler.dart'; // 📦 إضافة هامة للصلاحيات
+import 'package:audioplayers/audioplayers.dart'; // 📦 إضافة هامة لتشغيل الرنين
+
 import 'package:chat_app/services/call_service.dart';
-import 'package:chat_app/widgets/call_overlay.dart'; // استيراد نظام الطبقة العائمة
+import 'package:chat_app/widgets/call_overlay.dart';
 
 class VideoCallScreen extends StatefulWidget {
   final Call call;
@@ -16,6 +19,7 @@ class VideoCallScreen extends StatefulWidget {
 
 class _VideoCallScreenState extends State<VideoCallScreen> {
   late RtcEngine _engine;
+  final AudioPlayer _audioPlayer = AudioPlayer(); // مشغل صوت الرنين
 
   bool _localUserJoined = false;
   int? _remoteUid;
@@ -23,6 +27,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   bool _isCameraOff = false;
   bool _isSpeakerOn = false;
   bool _isScreenSharing = false;
+  bool _hasPermissions = false;
 
   Timer? _timer;
   int _seconds = 0;
@@ -33,10 +38,55 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   void initState() {
     super.initState();
     _isCameraOff = !widget.call.isVideo;
+    // مكالمة الفيديو تستخدم مكبر الصوت افتراضياً، والمكالمة الصوتية تستخدم سماعة الأذن
     _isSpeakerOn = widget.call.isVideo;
 
-    _initAgora();
+    _initializeCallSetup();
     _listenToCallStatus();
+  }
+
+  // 1️⃣ دالة مجمعة لطلب الصلاحيات ثم تهيئة Agora ثم تشغيل الرنين
+  Future<void> _initializeCallSetup() async {
+    await _requestPermissions();
+    if (_hasPermissions) {
+      await _initAgora();
+      _playDialingSound(); // بدء تشغيل الرنين فوراً
+    }
+  }
+
+  // 2️⃣ طلب الصلاحيات (لحل مشكلة عدم سماع الصوت وعدم ظهور الفيديو)
+  Future<void> _requestPermissions() async {
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.camera,
+      Permission.microphone,
+    ].request();
+
+    if (mounted) {
+      setState(() {
+        _hasPermissions = statuses[Permission.camera]!.isGranted &&
+            statuses[Permission.microphone]!.isGranted;
+      });
+    }
+
+    if (!_hasPermissions) {
+      debugPrint("لم يتم منح صلاحيات الكاميرا والمايكروفون!");
+      // يمكنك إظهار SnackBar هنا لتنبيه المستخدم
+    }
+  }
+
+  // 3️⃣ تشغيل صوت الرنين (لحل مشكلة عدم وجود صوت عند الاتصال)
+  Future<void> _playDialingSound() async {
+    try {
+      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+      // تأكد من إضافة ملف الصوتي في مجلد assets وتضمينه في pubspec.yaml
+      await _audioPlayer.play(AssetSource('sounds/dialing.mp3'));
+    } catch (e) {
+      debugPrint("خطأ في تشغيل صوت الرنين: $e");
+    }
+  }
+
+  void _stopAudio() {
+    _audioPlayer.stop();
   }
 
   void _listenToCallStatus() {
@@ -53,6 +103,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
               _callStatusText = "يـرن...";
             } else if (status == 'answered') {
               _callStatusText = "تم الرد";
+              _stopAudio(); // إيقاف الرنين فور رد الطرف الآخر
               _startTimer();
             }
           });
@@ -96,6 +147,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
               _remoteUid = remoteUid;
               _callStatusText = "متصل";
             });
+            _stopAudio(); // تأكيد إيقاف الرنين
             _startTimer();
           }
         },
@@ -105,12 +157,14 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       ),
     );
 
+    // تفعيل الصوت والفيديو بعد التأكد من الصلاحيات
     await _engine.enableAudio();
     if (widget.call.isVideo) {
       await _engine.enableVideo();
       await _engine.startPreview();
     }
 
+    // 4️⃣ ضبط مكبر الصوت بناءً على نوع المكالمة
     await _engine.setEnableSpeakerphone(_isSpeakerOn);
 
     await _engine.joinChannel(
@@ -123,6 +177,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   Future<void> _endCall({bool remoteEnded = false}) async {
     _timer?.cancel();
+    _stopAudio(); // إيقاف أي صوت شغال عند الإنهاء
 
     try {
       await _engine.leaveChannel();
@@ -138,7 +193,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       );
     }
 
-    // 🟢 استخدام CallOverlay بدلاً من Navigator.pop
+    // لتفادي التعارض مع النافذة المنبثقة
     CallOverlay.dismiss();
   }
 
@@ -158,7 +213,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       await _engine.stopScreenCapture();
       setState(() => _isScreenSharing = false);
     } else {
-      // 🛠️ تم التصحيح: استخدام startScreenCapture بدلاً من startScreenCaptureMobile
       await _engine.startScreenCapture(const ScreenCaptureParameters2());
       setState(() => _isScreenSharing = true);
     }
@@ -168,6 +222,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   void dispose() {
     _timer?.cancel();
     _callSubscription?.cancel();
+    _audioPlayer.dispose(); // 5️⃣ تنظيف مشغل الصوت من الذاكرة لتفادي انهيار التطبيق
     super.dispose();
   }
 
@@ -175,44 +230,57 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
-      // 🛠️ تم التصحيح: استخدام onPopInvokedWithResult بدلاً من المنتهية صلاحيتها
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        // 🟢 عند محاولة الرجوع، نقوم بتصغير المكالمة فقط
+        // 6️⃣ تصغير الشاشة بأمان تام عبر تقنية الـ Overlay
         CallOverlay.minimize();
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            Center(child: _remoteVideoOrAudioUI()),
-            if (!_isCameraOff && _localUserJoined)
+        body: SafeArea( // إضافة SafeArea لحماية الأزرار من حواف الشاشة
+          child: Stack(
+            children: [
+              Center(child: _remoteVideoOrAudioUI()),
+
+              // زر تصغير المكالمة اليدوي أعلى الشاشة
               Positioned(
-                top: 50,
-                right: 20,
-                child: SizedBox(
-                  width: 110,
-                  height: 150,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(15),
-                    child: AgoraVideoView(
-                      controller: VideoViewController(
-                        rtcEngine: _engine,
-                        canvas: const VideoCanvas(uid: 0),
+                top: 20,
+                left: 20,
+                child: IconButton(
+                  icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 35),
+                  onPressed: () => CallOverlay.minimize(),
+                ),
+              ),
+
+              if (!_isCameraOff && _localUserJoined && widget.call.isVideo)
+                Positioned(
+                  top: 50,
+                  right: 20,
+                  child: SizedBox(
+                    width: 110,
+                    height: 150,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(15),
+                      child: AgoraVideoView(
+                        controller: VideoViewController(
+                          rtcEngine: _engine,
+                          canvas: const VideoCanvas(uid: 0),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            _buildToolbar(),
-          ],
+              _buildToolbar(),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _remoteVideoOrAudioUI() {
-    if (_remoteUid != null && !_isCameraOff && widget.call.isVideo) {
+    // 🛠️ تم التعديل: لا نربط إخفاء كاميرا المستخدم الآخر بحالة كاميرتي (_isCameraOff)
+    if (_remoteUid != null && widget.call.isVideo) {
       return AgoraVideoView(
         controller: VideoViewController.remote(
           rtcEngine: _engine,
@@ -266,7 +334,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
               iconColor: _muted ? Colors.black : Colors.white,
               onTap: () {
                 setState(() => _muted = !_muted);
-                _engine.muteLocalAudioStream(_muted);
+                _engine.muteLocalAudioStream(_muted); // كتم وفك كتم المايك
               },
             ),
             const SizedBox(width: 15),
@@ -276,23 +344,25 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
               iconColor: _isSpeakerOn ? Colors.black : Colors.white,
               onTap: () {
                 setState(() => _isSpeakerOn = !_isSpeakerOn);
-                _engine.setEnableSpeakerphone(_isSpeakerOn);
+                _engine.setEnableSpeakerphone(_isSpeakerOn); // التبديل بين المكبر والسماعة
               },
             ),
-            const SizedBox(width: 15),
-            _buildCircleButton(
-              icon: _isCameraOff ? Icons.videocam_off : Icons.videocam,
-              color: _isCameraOff ? Colors.white : Colors.white24,
-              iconColor: _isCameraOff ? Colors.black : Colors.white,
-              onTap: _toggleCamera,
-            ),
-            const SizedBox(width: 15),
-            _buildCircleButton(
-              icon: _isScreenSharing ? Icons.stop_screen_share : Icons.screen_share,
-              color: _isScreenSharing ? const Color(0xFFFFD700) : Colors.white24,
-              iconColor: _isScreenSharing ? Colors.black : Colors.white,
-              onTap: _toggleScreenShare,
-            ),
+            if (widget.call.isVideo) ...[
+              const SizedBox(width: 15),
+              _buildCircleButton(
+                icon: _isCameraOff ? Icons.videocam_off : Icons.videocam,
+                color: _isCameraOff ? Colors.white : Colors.white24,
+                iconColor: _isCameraOff ? Colors.black : Colors.white,
+                onTap: _toggleCamera,
+              ),
+              const SizedBox(width: 15),
+              _buildCircleButton(
+                icon: _isScreenSharing ? Icons.stop_screen_share : Icons.screen_share,
+                color: _isScreenSharing ? const Color(0xFFFFD700) : Colors.white24,
+                iconColor: _isScreenSharing ? Colors.black : Colors.white,
+                onTap: _toggleScreenShare,
+              ),
+            ],
             const SizedBox(width: 15),
             _buildCircleButton(
               icon: Icons.call_end,

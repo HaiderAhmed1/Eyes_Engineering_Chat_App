@@ -29,6 +29,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.haider.chat.app"
+    // التعديل: تم الرفع إلى SDK 36 لتتوافق مع أحدث حزم فلاتر مثل image_picker وغيرها
     compileSdk = 36
     ndkVersion = "27.0.12077973"
 
@@ -49,9 +50,9 @@ android {
 
     defaultConfig {
         applicationId = "com.haider.chat.app"
-        // الحد الأدنى للإصدار لضمان توافق المكتبات
-        minSdk = flutter.minSdkVersion
-        targetSdk = 36
+        // تحديد minSdk بـ 24 لضمان عمل محرك Agora و Firebase المتقدم بدون أي أخطاء أو انهيارات
+        minSdk = 24
+        targetSdk = 36 // تم الرفع إلى 36
         versionCode = flutterVersionCode.toInt()
         versionName = flutterVersionName
 
@@ -90,11 +91,13 @@ flutter {
 }
 
 dependencies {
-    // --- تم التعديل: استخدام الإصدار 2.1.4 المتوفر والمطلوب ---
+    // دعم ميزات الجافا الحديثة
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 
+    // مكتبات فايربيس
     implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
     implementation("com.google.firebase:firebase-messaging")
 
+    // دعم التطبيقات الكبيرة (MultiDex)
     implementation("androidx.multidex:multidex:2.0.1")
 }
